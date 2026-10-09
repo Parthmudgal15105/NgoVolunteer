@@ -428,9 +428,11 @@ function Shell() {
             <Route
               path="announcements"
               element={
-                <AdminOnly>
+                user.role === "admin" ? (
                   <Announcements />
-                </AdminOnly>
+                ) : (
+                  <Navigate to="/app" />
+                )
               }
             />
             <Route
@@ -537,8 +539,8 @@ function Overview({ reports = false }) {
         }
       >
         <Link className="button" to="/app/events">
-          {admin ? <Plus size={17} /> : <Search size={17} />}{" "}
-          {admin ? "Manage events" : "Explore events"}
+          {user.role === "admin" ? <Plus size={17} /> : <Search size={17} />}{" "}
+          {user.role === "admin" ? "Manage events" : "Explore events"}
         </Link>
       </PageHead>
       <div className="impact-banner">
@@ -665,18 +667,20 @@ function Overview({ reports = false }) {
                   Settings,
                 ],
               ]
-          ).map(([t, s, p, I]) => (
-            <Link className="quick-link" key={p} to={`/app/${p}`}>
-              <span className="stat-icon">
-                <I size={19} />
-              </span>
-              <div>
-                <strong>{t}</strong>
-                <small>{s}</small>
-              </div>
-              <ArrowUpRight size={18} />
-            </Link>
-          ))}
+          )
+            .filter(([, , p]) => user.role === "admin" || p !== "announcements")
+            .map(([t, s, p, I]) => (
+              <Link className="quick-link" key={p} to={`/app/${p}`}>
+                <span className="stat-icon">
+                  <I size={19} />
+                </span>
+                <div>
+                  <strong>{t}</strong>
+                  <small>{s}</small>
+                </div>
+                <ArrowUpRight size={18} />
+              </Link>
+            ))}
         </section>
       </div>
       <div className="dashboard-grid">
