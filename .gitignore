@@ -1,0 +1,17 @@
+node_modules/
+.env
+server/.env
+client/.env
+client/dist/
+.DS_Store
+private/
+.data/
+backups/
+tmp/
+output/
+docs/
+design-qa.md
+*.log
+.env.*
+!.env.example
+*.xlsx
