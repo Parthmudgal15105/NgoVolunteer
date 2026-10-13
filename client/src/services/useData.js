@@ -5,6 +5,7 @@ export function useData(path) {
     [error, setError] = useState("");
   const load = () => {
     setError("");
+    if (!path) return Promise.resolve();
     return api
       .get(path)
       .then((r) => setData(r.data))

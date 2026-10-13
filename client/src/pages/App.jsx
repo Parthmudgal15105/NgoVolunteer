@@ -1,4 +1,5 @@
 import NgoBrand from "../components/NgoBrand";
+import Contributions from "../components/Contributions";
 import VolunteerOverview from "../components/VolunteerOverview";
 import { useData } from "../services/useData";
 import { State, Badge, Empty, EventCard, date } from "../components/Common";
@@ -11,6 +12,7 @@ import {
   Navigate,
   useNavigate,
   useLocation,
+  useSearchParams,
 } from "react-router-dom";
 import {
   Heart,
@@ -483,6 +485,7 @@ function Overview({ reports = false }) {
   if (!admin && !reports) return <VolunteerOverview dashboard={d} />;
   const stats = admin
     ? [
+        ["Reward Points (RP)", d.rp, Award, "Earned by your members"],
         [
           "Total volunteers",
           d.totalVolunteers,
@@ -495,7 +498,12 @@ function Overview({ reports = false }) {
           CalendarDays,
           `${d.completed} events completed`,
         ],
-        ["Volunteering hours", d.hours, Clock, "Time that made a difference"],
+        [
+          "Drives completed this year",
+          d.drivesCompletedThisYear,
+          CalendarDays,
+          "Attended drives this calendar year",
+        ],
         [
           "Certificates issued",
           d.certificates,
@@ -504,7 +512,12 @@ function Overview({ reports = false }) {
         ],
       ]
     : [
-        ["Volunteering hours", d.hours, Clock, "Every hour makes a difference"],
+        [
+          "Drives completed this year",
+          d.drivesCompletedThisYear,
+          CalendarDays,
+          "Attended drives this calendar year",
+        ],
         [
           "Events participated",
           d.participated,
@@ -1210,12 +1223,18 @@ function Applications({ assigned = false }) {
   );
 }
 function AttendancePage() {
+  const [params, setParams] = useSearchParams();
+  const memberId = params.get("member") || "";
   const { user } = useAuth(),
     admin = user.role !== "volunteer",
     { data, error, load } = useData("/attendance"),
     { data: regs } = useData("/registrations"),
+    { data: members } = useData(admin ? "/volunteers" : null),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
+  const memberAttendance = data?.filter(
+    (record) => !admin || record.volunteer?._id === memberId,
+  );
   async function mark(r, status) {
     setBusy(true);
     try {
@@ -1232,7 +1251,13 @@ function AttendancePage() {
       setBusy(false);
     }
   }
-  const rows = admin ? regs?.filter((r) => r.status === "approved") : data;
+  const rows = admin
+    ? regs?.filter(
+        (r) =>
+          r.status === "approved" &&
+          (!memberId || r.volunteer?._id === memberId),
+      )
+    : data;
   return (
     <>
       <PageHead
@@ -1248,73 +1273,104 @@ function AttendancePage() {
           {message}
         </div>
       )}
-      <div className="summary-strip">
-        <Clock />
-        <strong>{data?.reduce((n, a) => n + a.hours, 0) || 0} hours</strong>
-        <span>of recorded contribution</span>
-      </div>
+      {admin && (
+        <label>
+          Member attendance
+          <select
+            value={memberId}
+            onChange={(e) =>
+              setParams(e.target.value ? { member: e.target.value } : {})
+            }
+          >
+            <option value="">Choose a member to view their records</option>
+            {members?.map((member) => (
+              <option key={member._id} value={member._id}>
+                {member.name} · {member.departments?.join(", ")}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {(!admin || memberId) && (
+        <div className="summary-strip">
+          <Clock />
+          <strong>
+            {memberAttendance?.reduce((n, a) => n + a.hours, 0) || 0} hours
+          </strong>
+          <span>of recorded event attendance</span>
+        </div>
+      )}
       <State data={data} error={error} />
-      <div className="panel table-wrap">
-        <table>
-          <thead>
-            <tr>
-              {admin && <th>Volunteer</th>}
-              <th>Event</th>
-              <th>Date</th>
-              <th>Attendance</th>
-              <th>Hours</th>
-              {admin && <th>Mark attendance</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {rows?.map((r) => {
-              const record = admin
-                ? data?.find(
-                    (a) =>
-                      a.event?._id === r.event?._id &&
-                      a.volunteer?._id === r.volunteer?._id,
-                  )
-                : r;
-              return (
-                <tr key={r._id}>
-                  {admin && <td>{r.volunteer?.name}</td>}
-                  <td>{r.event?.title}</td>
-                  <td>{date(r.event?.date)}</td>
-                  <td>
-                    <Badge>{record?.status || "unmarked"}</Badge>
-                  </td>
-                  <td>{record?.hours || 0}h</td>
-                  {admin && (
+      {admin && !memberId ? (
+        <Empty>
+          Choose a member to see their event attendance and mark changes.
+        </Empty>
+      ) : (
+        <div className="panel table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {admin && <th>Volunteer</th>}
+                <th>Event</th>
+                <th>Date</th>
+                <th>Attendance</th>
+                <th>Hours</th>
+                <th>RP</th>
+                {admin && <th>Mark attendance</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows?.map((r) => {
+                const record = admin
+                  ? data?.find(
+                      (a) =>
+                        a.event?._id === r.event?._id &&
+                        a.volunteer?._id === r.volunteer?._id,
+                    )
+                  : r;
+                return (
+                  <tr key={r._id}>
+                    {admin && <td>{r.volunteer?.name}</td>}
+                    <td>{r.event?.title}</td>
+                    <td>{date(r.event?.date)}</td>
                     <td>
-                      <div className="inline-actions">
-                        <button
-                          className="small"
-                          disabled={
-                            busy || new Date(r.event?.date) > new Date()
-                          }
-                          onClick={() => mark(r, "present")}
-                        >
-                          Present
-                        </button>
-                        <button
-                          className="small secondary"
-                          disabled={
-                            busy || new Date(r.event?.date) > new Date()
-                          }
-                          onClick={() => mark(r, "absent")}
-                        >
-                          Absent
-                        </button>
-                      </div>
+                      <Badge>{record?.status || "unmarked"}</Badge>
                     </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {rows?.length === 0 && <Empty>No attendance records yet.</Empty>}
-      </div>
+                    <td>{record?.hours || 0}h</td>
+                    <td>{record?.rp || 0} RP</td>
+                    {admin && (
+                      <td>
+                        <div className="inline-actions">
+                          <button
+                            className="small"
+                            disabled={
+                              busy || new Date(r.event?.date) > new Date()
+                            }
+                            onClick={() => mark(r, "present")}
+                          >
+                            Present
+                          </button>
+                          <button
+                            className="small secondary"
+                            disabled={
+                              busy || new Date(r.event?.date) > new Date()
+                            }
+                            onClick={() => mark(r, "absent")}
+                          >
+                            Absent
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {rows?.length === 0 && <Empty>No attendance records yet.</Empty>}
+        </div>
+      )}
+      <Contributions />
     </>
   );
 }
@@ -1630,6 +1686,7 @@ function Volunteers() {
             <tr>
               <th>Volunteer</th>
               <th>Department & role</th>
+              <th>Drive & task contributions</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -1663,10 +1720,27 @@ function Volunteers() {
                     </small>
                   </td>
                   <td>
+                    {v.contribution?.drives || 0} drives ·{" "}
+                    {v.contribution?.tasks || 0} tasks
+                    <small>{v.contribution?.hours || 0} recorded hours</small>
+                    <strong>{v.rp || 0} RP</strong>
+                    {!!v.contribution?.unrecorded && (
+                      <small>
+                        {v.contribution.unrecorded} durations unrecorded
+                      </small>
+                    )}
+                  </td>
+                  <td>
                     <Badge>{v.active ? "active" : "inactive"}</Badge>
                   </td>
                   <td>
                     <div className="inline-actions">
+                      <Link
+                        className="button small"
+                        to={`/app/attendance?member=${v._id}`}
+                      >
+                        Attendance & RP
+                      </Link>
                       <button
                         className="small secondary"
                         onClick={() => toggle(v)}

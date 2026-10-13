@@ -103,6 +103,27 @@ const attendanceSchema = new Schema(
 );
 attendanceSchema.index({ event: 1, volunteer: 1 }, { unique: true });
 export const Attendance = model("Attendance", attendanceSchema);
+const contributionSchema = new Schema(
+  {
+    volunteer: ref("User"),
+    title: { type: String, required: true },
+    kind: {
+      type: String,
+      enum: ["drive", "task", "reel_edit", "misc"],
+      required: true,
+    },
+    date: { type: Date, required: true },
+    status: { type: String, enum: ["present", "absent"], required: true },
+    hours: { type: Number, min: 0, max: 24, default: null },
+    location: String,
+    notes: String,
+    sourceKey: { type: String, unique: true, sparse: true },
+    sourceDepartment: String,
+    markedBy: ref("User", false),
+  },
+  options,
+);
+export const Contribution = model("Contribution", contributionSchema);
 const certificateSchema = new Schema(
   {
     event: ref("Event"),

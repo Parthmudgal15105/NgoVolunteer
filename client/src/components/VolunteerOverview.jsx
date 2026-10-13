@@ -20,8 +20,9 @@ export default function VolunteerOverview({ dashboard }) {
       </div>
       <div className="stats-grid reference-stats">
         {[
+          [dashboard.rp, "Reward Points (RP)"],
           [dashboard.joined, "Drives Joined"],
-          [dashboard.hours, "Volunteer Hours"],
+          [dashboard.drivesCompletedThisYear, "Drives Completed This Year"],
           [dashboard.participated, "Activities"],
           [dashboard.certificates, "Certificates"],
         ].map(([value, label]) => (

@@ -11,6 +11,7 @@ import {
   Attendance,
   Certificate,
   SourceRow,
+  Contribution,
 } from "../server/models/index.js";
 process.env.JWT_SECRET = "department-access-integration-secret-at-least-32";
 const { default: app } = await import("../server/app.js");
@@ -127,6 +128,96 @@ test("department heads cannot read or change another department, including direc
   }
   assert.equal((await req("/dashboard", ht)).body.totalVolunteers, 2);
   assert.equal((await req("/dashboard", ht)).body.hours, 2);
+  const contribution = await req("/contributions", ht, {
+    volunteer: own._id,
+    title: "Research brief",
+    kind: "task",
+    date: "2026-01-01",
+    status: "present",
+    hours: "",
+    notes: "Completed research",
+  });
+  assert.equal(contribution.status, 201);
+  assert.equal(contribution.body.hours, null);
+  assert.equal(
+    (
+      await req("/contributions", ht, {
+        volunteer: outside._id,
+        title: "Outside task",
+        kind: "task",
+        date: "2026-01-01",
+        status: "present",
+        hours: 2,
+      })
+    ).status,
+    403,
+  );
+  const hiddenContribution = await Contribution.create({
+    volunteer: outside._id,
+    title: "Outside drive",
+    kind: "drive",
+    date: "2026-01-01",
+    status: "present",
+  });
+  assert.equal(
+    (
+      await req(
+        `/contributions/${hiddenContribution._id}`,
+        ht,
+        { status: "absent", hours: 0 },
+        "PATCH",
+      )
+    ).status,
+    403,
+  );
+  assert.equal((await req("/contributions", ht)).body.length, 1);
+  assert.equal((await req("/contributions", vt)).body.length, 1);
+  assert.equal((await req("/contributions", at)).body.length, 2);
+  assert.equal(
+    (
+      await req("/contributions", vt, {
+        volunteer: own._id,
+        title: "Self approval",
+        kind: "task",
+        date: "2026-01-01",
+        status: "present",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await req(
+        `/contributions/${contribution.body._id}`,
+        ht,
+        { status: "present", hours: 2, notes: "Duration confirmed" },
+        "PATCH",
+      )
+    ).body.hours,
+    2,
+  );
+  assert.equal(
+    (
+      await req(
+        `/contributions/${contribution.body._id}`,
+        ht,
+        { status: "absent", hours: 2 },
+        "PATCH",
+      )
+    ).body.hours,
+    0,
+  );
+  assert.equal(
+    (
+      await req(
+        `/contributions/${contribution.body._id}`,
+        ht,
+        { status: "present", hours: -1 },
+        "PATCH",
+      )
+    ).status,
+    400,
+  );
   assert.equal((await req("/source-data", ht)).status, 403);
   assert.equal((await req("/source-data", at)).status, 200);
   assert.equal(
@@ -248,4 +339,99 @@ test("department heads cannot read or change another department, including direc
     ).status,
     200,
   );
+});
+
+test("heads award scoped RP, volunteers see totals, and corrections recalculate rewards", async () => {
+  const password = "RewardPassword123!";
+  const hash = await bcrypt.hash(password, 10);
+  const make = (name, role, departments) =>
+    User.create({
+      name,
+      email: `${name}@test.org`,
+      password: hash,
+      role,
+      departments,
+    });
+  const head = await make("reward-head", "head", ["Social & Content"]);
+  const member = await make("reward-member", "volunteer", ["Social & Content"]);
+  const outside = await make("reward-outside", "volunteer", ["Research"]);
+  const token = async (u) =>
+    (await req("/auth/login", "", { email: u.email, password })).body.token;
+  const ht = await token(head),
+    vt = await token(member);
+  const body = {
+    volunteer: String(member._id),
+    title: "Edited reel",
+    kind: "reel_edit",
+    status: "present",
+    date: "2025-01-01",
+    hours: "",
+  };
+  const reel = await req("/contributions", ht, body);
+  assert.equal(reel.status, 201);
+  assert.equal(
+    (
+      await req("/contributions", ht, {
+        ...body,
+        volunteer: String(outside._id),
+      })
+    ).status,
+    403,
+  );
+  assert.equal((await req("/contributions", vt, body)).status, 403);
+  assert.equal(
+    (
+      await req("/contributions", ht, {
+        ...body,
+        kind: "drive",
+        title: "Attended drive",
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await req("/contributions", ht, {
+        ...body,
+        kind: "misc",
+        title: "Misc action",
+      })
+    ).status,
+    201,
+  );
+  assert.equal((await req("/dashboard", vt)).body.rp, 10);
+  assert.equal(
+    (await req("/contributions", vt)).body.reduce((n, r) => n + r.rp, 0),
+    10,
+  );
+  assert.equal(
+    (await req("/volunteers", ht)).body.find(
+      (u) => u._id === String(member._id),
+    ).rp,
+    10,
+  );
+  assert.equal(
+    (
+      await req(
+        `/contributions/${reel.body._id}`,
+        ht,
+        { status: "absent", hours: "" },
+        "PATCH",
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await req("/dashboard", vt)).body.rp, 7);
+  assert.equal(
+    (
+      await req(
+        `/contributions/${reel.body._id}`,
+        ht,
+        { status: "present", kind: "misc", hours: "" },
+        "PATCH",
+      )
+    ).status,
+    200,
+  );
+  assert.equal((await req("/dashboard", vt)).body.rp, 9);
 });

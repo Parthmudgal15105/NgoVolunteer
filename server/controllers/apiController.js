@@ -1,3 +1,4 @@
+import { contributionRP, isSocialDepartment } from "../utils/rewards.js";
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -13,6 +14,7 @@ import {
   Notification,
   Announcement,
   SourceRow,
+  Contribution,
 } from "../models/index.js";
 import { auth, admin, manager } from "../middleware/auth.js";
 import { issueCertificates } from "../utils/certificates.js";
@@ -406,10 +408,46 @@ router.get(
     const profiles = await VolunteerProfile.find({
       user: { $in: users.map((u) => u._id) },
     }).lean();
+    const contributions = await Contribution.aggregate([
+      {
+        $match: {
+          volunteer: { $in: users.map((u) => u._id) },
+          status: "present",
+        },
+      },
+      {
+        $group: {
+          _id: "$volunteer",
+          drives: { $sum: { $cond: [{ $eq: ["$kind", "drive"] }, 1, 0] } },
+          tasks: { $sum: { $cond: [{ $ne: ["$kind", "drive"] }, 1, 0] } },
+          hours: { $sum: { $ifNull: ["$hours", 0] } },
+          unrecorded: { $sum: { $cond: [{ $eq: ["$hours", null] }, 1, 0] } },
+        },
+      },
+    ]);
+    const rewardTotals = new Map();
+    const addReward = (id, rp) =>
+      rewardTotals.set(String(id), (rewardTotals.get(String(id)) || 0) + rp);
+    const ids = users.map((u) => u._id);
+    for (const r of await Contribution.find({ volunteer: { $in: ids } }).lean())
+      addReward(r.volunteer, contributionRP(r));
+    for (const r of await Attendance.find({
+      volunteer: { $in: ids },
+      status: "present",
+    }).lean())
+      addReward(r.volunteer, 5);
+    const totals = new Map(contributions.map((c) => [String(c._id), c]));
     res.json(
       users.map((u) => ({
         ...u,
+        rp: rewardTotals.get(String(u._id)) || 0,
         profile: profiles.find((p) => String(p.user) === String(u._id)),
+        contribution: totals.get(String(u._id)) || {
+          drives: 0,
+          tasks: 0,
+          hours: 0,
+          unrecorded: 0,
+        },
       })),
     );
   }),
@@ -439,9 +477,114 @@ router.get(
       await Attendance.find(await participationScope(req.user))
         .populate("event")
         .populate("volunteer", "name email")
-        .sort({ updatedAt: -1 }),
+        .sort({ updatedAt: -1 })
+        .lean()
+        .then((rows) =>
+          rows.map((r) => ({ ...r, rp: r.status === "present" ? 5 : 0 })),
+        ),
     ),
   ),
+);
+router.get(
+  "/contributions",
+  wrap(async (req, res) => {
+    res.json(
+      (
+        await Contribution.find(await participationScope(req.user))
+          .populate("volunteer", "name departments organizationRole")
+          .sort({ date: -1 })
+          .lean()
+      ).map((r) => ({ ...r, rp: contributionRP(r) })),
+    );
+  }),
+);
+router.post(
+  "/contributions",
+  manager,
+  wrap(async (req, res) => {
+    const { volunteer, kind, status } = req.body;
+    await requireManaged(req.user, volunteer);
+    const member = await User.findOne({ _id: volunteer, active: true });
+    if (!member) fail("Select an active member.");
+    if (
+      ["reel_edit", "misc"].includes(kind) &&
+      !member.departments.some(isSocialDepartment)
+    )
+      fail(
+        "Reel edits and miscellaneous RP are for Social Media members only.",
+      );
+    const title = text(req.body.title, 180);
+    const date = new Date(req.body.date);
+    const hours =
+      req.body.hours === "" || req.body.hours == null
+        ? null
+        : Number(req.body.hours);
+    if (
+      !title ||
+      !["drive", "task", "reel_edit", "misc"].includes(kind) ||
+      !["present", "absent"].includes(status) ||
+      Number.isNaN(date.getTime()) ||
+      date > new Date() ||
+      (hours !== null && (!Number.isFinite(hours) || hours < 0 || hours > 24))
+    )
+      fail(
+        "Enter an activity, past date, attendance and valid hours (0–24), or leave hours blank.",
+      );
+    res.status(201).json(
+      await Contribution.create({
+        volunteer,
+        title,
+        kind,
+        sourceDepartment: ["reel_edit", "misc"].includes(kind)
+          ? member.departments.find(isSocialDepartment)
+          : undefined,
+        date,
+        status,
+        hours: status === "absent" ? 0 : hours,
+        location: text(req.body.location, 180),
+        notes: text(req.body.notes, 1000),
+        markedBy: req.user._id,
+      }),
+    );
+  }),
+);
+router.patch(
+  "/contributions/:id",
+  manager,
+  wrap(async (req, res) => {
+    const record = await Contribution.findById(req.params.id);
+    if (!record) fail("Contribution not found.", 404);
+    await requireManaged(req.user, record.volunteer);
+    const { status } = req.body;
+    const hours =
+      req.body.hours === "" || req.body.hours == null
+        ? null
+        : Number(req.body.hours);
+    if (
+      !["present", "absent"].includes(status) ||
+      (hours !== null && (!Number.isFinite(hours) || hours < 0 || hours > 24))
+    )
+      fail("Select attendance and valid hours (0–24), or leave hours blank.");
+    const kind = req.body.kind || record.kind;
+    if (!["drive", "task", "reel_edit", "misc"].includes(kind))
+      fail("Select a valid activity type.");
+    if (["reel_edit", "misc"].includes(kind)) {
+      const member = await User.findById(record.volunteer);
+      const department = member.departments.find(isSocialDepartment);
+      if (!department)
+        fail(
+          "Reel edits and miscellaneous RP are for Social Media members only.",
+        );
+      record.sourceDepartment = department;
+    }
+    record.kind = kind;
+    record.status = status;
+    record.hours = status === "absent" ? 0 : hours;
+    record.notes = text(req.body.notes, 1000);
+    record.markedBy = req.user._id;
+    await record.save();
+    res.json(record);
+  }),
 );
 router.put(
   "/attendance",
@@ -555,14 +698,21 @@ router.get(
   wrap(async (req, res) => {
     const isAdmin = ["admin", "head"].includes(req.user.role),
       filter = await participationScope(req.user);
-    const [attendance, registrations, certificates, events, volunteers] =
-      await Promise.all([
-        Attendance.find(filter).populate("event"),
-        EventRegistration.find(filter).populate("event"),
-        Certificate.countDocuments(filter),
-        Event.find().sort({ date: 1 }),
-        isAdmin ? User.find(managedUsers(req.user)) : [],
-      ]);
+    const [
+      attendance,
+      registrations,
+      certificates,
+      events,
+      volunteers,
+      contributions,
+    ] = await Promise.all([
+      Attendance.find(filter).populate("event"),
+      EventRegistration.find(filter).populate("event"),
+      Certificate.countDocuments(filter),
+      Event.find().sort({ date: 1 }),
+      isAdmin ? User.find(managedUsers(req.user)) : [],
+      Contribution.find(filter).lean(),
+    ]);
     const hours = attendance.reduce((n, a) => n + a.hours, 0),
       present = attendance.filter((a) => a.status === "present");
     const months = Array.from({ length: 6 }, (_, i) => {
@@ -580,7 +730,27 @@ router.get(
           .reduce((n, a) => n + a.hours, 0),
       };
     });
+    const currentYear = new Date().toLocaleDateString("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+    });
+    const inCurrentYear = (date) =>
+      date &&
+      new Date(date).toLocaleDateString("en-US", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+      }) === currentYear;
+    const drivesCompletedThisYear =
+      present.filter((a) => inCurrentYear(a.event?.date)).length +
+      contributions.filter(
+        (r) =>
+          r.kind === "drive" && r.status === "present" && inCurrentYear(r.date),
+      ).length;
     res.json({
+      drivesCompletedThisYear,
+      rp:
+        present.length * 5 +
+        contributions.reduce((sum, r) => sum + contributionRP(r), 0),
       hours,
       participated: present.length,
       joined: registrations.filter((r) => r.status === "approved").length,

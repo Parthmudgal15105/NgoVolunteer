@@ -2,6 +2,8 @@
 
 A complete MERN application for NGOs to organise opportunities, manage volunteer applications, record attendance, track hours, and issue PDF participation certificates. The interface includes public pages and separate administrator and volunteer workspaces, styled to match the supplied NGO walkthrough.
 
+For a complete fresh-machine setup with copyable commands, see [LOCAL_SETUP.md](LOCAL_SETUP.md). It covers the disposable demo, persistent Docker-backed development, seed accounts, and troubleshooting.
+
 ## Features
 
 - Volunteer registration, password hashing with bcrypt, JWT sessions, and server-side role checks.
@@ -9,6 +11,7 @@ A complete MERN application for NGOs to organise opportunities, manage volunteer
 - Searchable events with cause filters, details, capacity, dates, and duration.
 - Pending applications, administrator approval/rejection, direct assignments, and personal notifications.
 - Attendance and derived hour totals; repeated attendance updates never add duplicate hours.
+- Reward points for attended drives and eligible Social & Content contributions, with per-member totals for volunteers and department heads.
 - Automatic certificates for present volunteers once an event is completed; downloadable PDF files with unique IDs.
 - Volunteer account activation/deactivation and community announcements.
 - Database-backed dashboards, six-month contribution charts, cause breakdowns, attendance percentages, and certificate counts.
@@ -197,3 +200,11 @@ Access rules for the supplied roster:
 Users can sign in with their email or unique Login ID. Shared or malformed source emails require Login ID. Users can change passwords in My Profile. Public registration always creates a volunteer account and cannot grant management access. Imported records without a department are visible to full administrators only until their membership is corrected.
 
 The real workbook, credentials, generated handover XLSX, MongoDB files, private configuration, and review screenshots are excluded from this repository. A public clone contains application code and branding assets, with no real member accounts or database. Demo seeding is separate and must never be run against the real database.
+
+## Final database integration
+
+The October 2026 integration reads the supplied roster PDF, account handover, drive ODS, and request ODS. Extract privately with `scripts/extract-integration.py` using Python with `openpyxl` and `pypdf`, then run `npm run import:database` for review and `npm run import:database -- --apply` to import. Stop the local API first. The integration verifies the supplied account passwords against stored hashes before any member changes and preserves existing passwords and permissions. Private review results are saved in `private/imports/integration-review.json`.
+
+Current member roles and profile details come from the final roster PDF. Multiple existing department memberships remain intact. Missing identities are preserved for review. Historical drive entries link only to a unique exact normalized member name; unmatched, incomplete and duplicate entries remain in Imported records. All supplied PDF and ODS files are archived privately in MongoDB. Certificate and department-change submissions remain source requests; they do not automatically change memberships, deactivate members, or issue certificates.
+
+Attendance now includes **Drive & task contributions**, where administrators and department heads can record a member's activity, date, attendance, optional duration, and work notes. Heads can access only their department members; volunteers can read only their own records. The Volunteers table shows each member's drive/task counts and recorded activity hours. Blank historical durations remain unknown, and contribution records do not issue certificates or alter event attendance totals. Corrections update contribution totals, and repeat imports preserve corrections.
