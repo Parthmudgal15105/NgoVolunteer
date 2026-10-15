@@ -6,7 +6,9 @@ backups/
 tmp/
 output/
 .env*
+**/.env*
 client/.env*
+client/dist/
 node_modules/
 .git/
 .render/
