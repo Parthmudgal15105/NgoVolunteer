@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: ngo-volunteer-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: codex/production-deployment
+    buildCommand: npm ci --workspace server --omit=dev
+    startCommand: npm start --workspace server
+    healthCheckPath: /api/health
+    numInstances: 1
+    # Release manually after pausing writes; capacity locking is process-local.
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: TZ
+        value: Asia/Kolkata
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLIENT_ORIGIN
+        sync: false

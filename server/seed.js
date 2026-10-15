@@ -17,6 +17,8 @@ import {
 import { issueCertificates } from "./utils/certificates.js";
 dotenv.config({ path: fileURLToPath(new URL(".env", import.meta.url)) });
 export async function seed() {
+  if (process.env.NODE_ENV === "production")
+    throw new Error("Demo seeding is disabled in production.");
   if (await User.exists({ email: "admin@kindred.org" })) {
     console.log("Demo data already exists; nothing changed.");
     return;

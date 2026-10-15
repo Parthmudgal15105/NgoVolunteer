@@ -231,23 +231,26 @@ router.put(
   "/events/:id",
   admin,
   wrap(async (req, res) => {
-    const event = await Event.findById(req.params.id);
-    if (!event) fail("Event not found.", 404);
-    const fields = eventFields(req.body);
-    const count = await EventRegistration.countDocuments({
-      event: event._id,
-      status: "approved",
+    const updated = await exclusive(async () => {
+      const event = await Event.findById(req.params.id);
+      if (!event) fail("Event not found.", 404);
+      const fields = eventFields(req.body);
+      const count = await EventRegistration.countDocuments({
+        event: event._id,
+        status: "approved",
+      });
+      if (fields.capacity < count)
+        fail("Capacity cannot be below approved volunteers.");
+      if (
+        (await Attendance.exists({ event: event._id })) &&
+        fields.hours !== event.hours
+      )
+        fail("Hours cannot change after attendance has been recorded.");
+      Object.assign(event, fields);
+      await event.save();
+      return event;
     });
-    if (fields.capacity < count)
-      fail("Capacity cannot be below approved volunteers.");
-    if (
-      (await Attendance.exists({ event: event._id })) &&
-      fields.hours !== event.hours
-    )
-      fail("Hours cannot change after attendance has been recorded.");
-    Object.assign(event, fields);
-    await event.save();
-    res.json(event);
+    res.json(updated);
   }),
 );
 router.post(
@@ -805,8 +808,16 @@ router.use((err, req, res, next) => {
   if (err instanceof mongoose.Error.CastError)
     return res.status(400).json({ message: "Invalid record identifier." });
   if (err instanceof mongoose.Error.ValidationError)
-    return res.status(400).json({ message: err.message });
-  if (!err.status) console.error(err);
+    return res
+      .status(400)
+      .json({
+        message:
+          process.env.NODE_ENV === "production"
+            ? "Invalid record data."
+            : err.message,
+      });
+  if (!err.status)
+    console.error("API request failed", { name: err.name, code: err.code });
   res.status(err.status || 500).json({
     message: err.status
       ? err.message

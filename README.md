@@ -4,6 +4,8 @@ A complete MERN application for NGOs to organise opportunities, manage volunteer
 
 For a complete fresh-machine setup with copyable commands, see [LOCAL_SETUP.md](LOCAL_SETUP.md). It covers the disposable demo, persistent Docker-backed development, seed accounts, and troubleshooting.
 
+For Vercel, Render and Atlas production settings, safe database migration, and release verification, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Features
 
 - Volunteer registration, password hashing with bcrypt, JWT sessions, and server-side role checks.

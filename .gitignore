@@ -15,3 +15,5 @@ design-qa.md
 .env.*
 !.env.example
 *.xlsx
+.vercel/
+.render/

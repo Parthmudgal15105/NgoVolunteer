@@ -216,3 +216,46 @@ test("concurrent approvals cannot exceed capacity", async () => {
   );
   assert.deepEqual(results.map((x) => x.status).sort(), [200, 400]);
 });
+
+test("capacity edits and approvals share the same serialization", async () => {
+  const fields = {
+    title: "Concurrent capacity edit",
+    description: "Deployment regression",
+    category: "Community",
+    location: "Mumbai",
+    date: new Date(Date.now() + 86400000).toISOString(),
+    hours: 2,
+    capacity: 2,
+  };
+  const created = await request("/events", {
+    method: "POST",
+    token: admin,
+    body: fields,
+  });
+  const id = created.data._id;
+  const registrations = await Promise.all(
+    [volunteer, other].map((token) =>
+      request(`/events/${id}/apply`, { method: "POST", token }),
+    ),
+  );
+  await request(`/registrations/${registrations[0].data._id}`, {
+    method: "PATCH",
+    token: admin,
+    body: { status: "approved" },
+  });
+  const results = await Promise.all([
+    request(`/registrations/${registrations[1].data._id}`, {
+      method: "PATCH",
+      token: admin,
+      body: { status: "approved" },
+    }),
+    request(`/events/${id}`, {
+      method: "PUT",
+      token: admin,
+      body: { ...fields, capacity: 1 },
+    }),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 400]);
+  const event = (await request("/events")).data.find((e) => e._id === id);
+  assert.ok(event.approvedCount <= event.capacity);
+});

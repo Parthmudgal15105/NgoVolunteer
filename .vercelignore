@@ -1,0 +1,12 @@
+scripts/
+tests/
+private/
+.data/
+backups/
+tmp/
+output/
+.env*
+client/.env*
+node_modules/
+.git/
+.render/
