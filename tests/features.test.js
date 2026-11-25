@@ -339,6 +339,21 @@ test("tenure certificates issue only after the tenure and minimum RP", async () 
   });
   assert.equal(manual.status, 201);
   assert.equal(manual.body.kind, "manual");
+  // Volunteers cannot issue; heads can withdraw what they issued.
+  assert.equal(
+    (
+      await req("/program-certificates", vt, {
+        volunteer: vol._id,
+        title: "Self award",
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await req(`/program-certificates/${manual.body._id}`, ht, null, "DELETE"))
+      .status,
+    200,
+  );
 });
 
 test("event certificate edits survive later attendance saves", async () => {

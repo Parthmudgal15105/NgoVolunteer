@@ -531,7 +531,7 @@ function certificateFields(body) {
 }
 router.post(
   "/program-certificates",
-  managers,
+  requirePermission("issueCertificates"),
   wrap(async (req, res) => {
     await requireManaged(req.user, req.body.volunteer);
     const member = await User.findOne({
