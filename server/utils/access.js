@@ -28,7 +28,7 @@ export function permissions(user) {
     allVolunteers: admin || hr,
     issueCertificates: admin || head,
     editCertificates: admin || head,
-    certificateFormat: admin || hr,
+    certificateFormat: admin || head,
     manageRpRules: admin || head,
     announcements: admin,
     importedRecords: admin,

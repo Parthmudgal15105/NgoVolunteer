@@ -414,20 +414,20 @@ test("event certificate edits survive later attendance saves", async () => {
   );
 });
 
-test("certificate wording can be changed and previewed by HR, not other heads", async () => {
-  const hr = await member("hr2", "head", ["Human Resource"]);
+test("certificate wording can be changed by heads, not volunteers", async () => {
   const head = await member("mkt2", "head", ["Marketing"]);
+  const vol = await member("mktvol", "volunteer", ["Marketing"]);
   const body = {
     heading: "CERTIFICATE",
     manualBody: "from **{department} Department** for being **{title}**.",
   };
   assert.equal(
-    (await req("/certificate-template", await login(head), body, "PUT")).status,
+    (await req("/certificate-template", await login(vol), body, "PUT")).status,
     403,
   );
   const saved = await req(
     "/certificate-template",
-    await login(hr),
+    await login(head),
     body,
     "PUT",
   );

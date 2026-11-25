@@ -738,7 +738,8 @@ function Format({ canSave }) {
       <p className="muted">
         The layout, seal, trustee signatures and registration footer follow the
         official certificate. Edit the wording here.{" "}
-        {!canSave && "Only founders, BOD and HR can save changes."}
+        {!canSave &&
+          "Only founders, BOD, HR and department heads can save changes."}
       </p>
       {message && (
         <div className="toast" role="status" onClick={() => setMessage("")}>
