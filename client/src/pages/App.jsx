@@ -61,8 +61,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  BarChart,
-  Bar,
 } from "recharts";
 import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -461,7 +459,6 @@ function Shell() {
               element={
                 <AdminOnly>
                   <MonthlyReport />
-                  <Overview reports />
                 </AdminOnly>
               }
             />
@@ -479,13 +476,15 @@ function AdminOnly({ children }) {
     <Navigate to="/app" />
   );
 }
-function Overview({ reports = false }) {
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+function Overview() {
   const { user } = useAuth(),
     { data: d, error } = useData("/dashboard"),
     { data: announcements } = useData("/announcements");
   const admin = user.role !== "volunteer";
   if (!d) return <State data={d} error={error} />;
-  if (!admin && !reports) return <VolunteerOverview dashboard={d} />;
+  if (!admin) return <VolunteerOverview dashboard={d} />;
+  const chartKey = d.months.some((m) => m.hours > 0) ? "hours" : "rp";
   const stats = admin
     ? [
         ["Reward Points (RP)", d.rp, Award, "Earned by your members"],
@@ -511,7 +510,7 @@ function Overview({ reports = false }) {
           "Certificates issued",
           d.certificates,
           Award,
-          `${d.attendancePercentage}% attendance rate`,
+          "Event, tenure and manual certificates",
         ],
       ]
     : [
@@ -543,11 +542,7 @@ function Overview({ reports = false }) {
   return (
     <>
       <PageHead
-        title={
-          reports
-            ? "Your impact, in perspective."
-            : `Welcome, ${user.name.split(" ")[0]}!`
-        }
+        title={`Welcome, ${user.name.split(" ")[0]}!`}
         description={
           admin
             ? "Here’s how your community is making a difference."
@@ -560,7 +555,11 @@ function Overview({ reports = false }) {
           ) : (
             <Search size={17} />
           )}{" "}
-          {user.permissions?.manageEvents ? "Manage events" : "Explore events"}
+          {user.permissions?.manageEvents
+            ? "Manage events"
+            : admin
+              ? "View events"
+              : "Explore events"}
         </Link>
       </PageHead>
       <div className="impact-banner">
@@ -603,8 +602,14 @@ function Overview({ reports = false }) {
         <section className="panel chart-panel">
           <div className="section-head">
             <div>
-              <h3>Hours of impact</h3>
-              <p>Your volunteering contribution over time</p>
+              <h3>
+                {chartKey === "hours" ? "Hours of impact" : "Impact over time"}
+              </h3>
+              <p>
+                {chartKey === "hours"
+                  ? "Volunteer hours recorded each month"
+                  : "Reward Points earned each month from events, drives and tasks"}
+              </p>
             </div>
             <span className="pill">Last 6 months</span>
           </div>
@@ -630,12 +635,14 @@ function Overview({ reports = false }) {
               <YAxis
                 axisLine={false}
                 tickLine={false}
+                allowDecimals={false}
                 tick={{ fill: "#82908a", fontSize: 12 }}
               />
               <Tooltip />
               <Area
                 type="monotone"
-                dataKey="hours"
+                dataKey={chartKey}
+                name={chartKey === "hours" ? "Hours" : "RP"}
                 stroke="#ad0b61"
                 strokeWidth={3}
                 fill="url(#green)"
@@ -730,7 +737,9 @@ function Overview({ reports = false }) {
             ))
           ) : (
             <Empty>
-              No upcoming assignments yet. Explore events to get started.
+              {admin
+                ? "No upcoming events scheduled."
+                : "No upcoming assignments yet. Explore events to get started."}
             </Empty>
           )}
         </section>
@@ -749,19 +758,6 @@ function Overview({ reports = false }) {
           {!announcements?.length && <Empty>No announcements yet.</Empty>}
         </section>
       </div>
-      {reports && (
-        <section className="panel">
-          <h3>Events by cause</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={d.categories}>
-              <XAxis dataKey="name" />
-              <YAxis allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="value" fill="#ad0b61" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </section>
-      )}
     </>
   );
 }
@@ -884,7 +880,13 @@ function Events({ publicView = false }) {
             );
           })}
         </div>
-        {filtered?.length === 0 && <Empty>No events match your search.</Empty>}
+        {filtered?.length === 0 && (
+          <Empty>
+            {data?.length
+              ? "No events match your search."
+              : "No events have been scheduled yet."}
+          </Empty>
+        )}
         {detail && (
           <Modal title={detail.title} onClose={() => setDetail(null)}>
             <Badge>{detail.category}</Badge>
@@ -1589,13 +1591,16 @@ function Volunteers() {
                     </small>
                   </td>
                   <td>
-                    {v.contribution?.drives || 0} drives ·{" "}
-                    {v.contribution?.tasks || 0} tasks
-                    <small>{v.contribution?.hours || 0} recorded hours</small>
+                    {plural(v.contribution?.drives || 0, "drive")} ·{" "}
+                    {plural(v.contribution?.tasks || 0, "task")}
+                    <small>
+                      {plural(v.contribution?.hours || 0, "recorded hour")}
+                    </small>
                     <strong>{v.rp || 0} RP</strong>
                     {!!v.contribution?.unrecorded && (
                       <small>
-                        {v.contribution.unrecorded} durations unrecorded
+                        {plural(v.contribution.unrecorded, "duration")}{" "}
+                        unrecorded
                       </small>
                     )}
                   </td>

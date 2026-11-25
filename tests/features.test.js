@@ -441,3 +441,29 @@ test("certificate wording can be changed by heads, not volunteers", async () => 
   );
   assert.equal(preview.status, 200);
 });
+test("head dashboard counts program certificates and charts monthly RP", async () => {
+  const head = await member("dashhead", "head", ["Dashboard Dept"]);
+  const vol = await member("dashvol", "volunteer", ["Dashboard Dept"]);
+  await member("othervol", "volunteer", ["Elsewhere"]);
+  await VolunteerProfile.create({ user: vol._id, joiningDate: "01/01/2026" });
+  await Contribution.create({
+    volunteer: vol._id,
+    title: "Education Drive",
+    kind: "drive",
+    date: new Date(),
+    status: "present",
+  });
+  await ProgramCertificate.create({
+    volunteer: vol._id,
+    certificateId: "WWC-M-DASHBOARD-TEST",
+    kind: "manual",
+    title: "Volunteer of the Month",
+  });
+  const d = (await req("/dashboard", await login(head))).body;
+  assert.equal(d.certificates, 1);
+  assert.equal(d.months.length, 6);
+  const current = d.months.at(-1);
+  assert.equal(current.rp, 5);
+  assert.equal(current.activities, 1);
+  assert.equal(current.hours, 0);
+});

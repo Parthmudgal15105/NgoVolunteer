@@ -28,6 +28,7 @@ import {
   SourceRow,
   Contribution,
   RpRule,
+  ProgramCertificate,
 } from "../models/index.js";
 import { auth, admin, manager } from "../middleware/auth.js";
 import { issueCertificates } from "../utils/certificates.js";
@@ -712,7 +713,8 @@ router.get(
     const [
       attendance,
       registrations,
-      certificates,
+      eventCertificates,
+      programCertificates,
       events,
       volunteers,
       contributions,
@@ -720,25 +722,39 @@ router.get(
       Attendance.find(filter).populate("event"),
       EventRegistration.find(filter).populate("event"),
       Certificate.countDocuments(filter),
+      ProgramCertificate.countDocuments(filter),
       Event.find().sort({ date: 1 }),
       isAdmin ? User.find(managedUsers(req.user)) : [],
       Contribution.find(filter).lean(),
     ]);
     const hours = attendance.reduce((n, a) => n + a.hours, 0),
       present = attendance.filter((a) => a.status === "present");
+    // Bucket by India time so late-evening records land in the right month.
+    const IST_OFFSET = 5.5 * 60 * 60 * 1000;
+    const monthOf = (date) => {
+      const d = new Date(new Date(date).getTime() + IST_OFFSET);
+      return `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+    };
     const months = Array.from({ length: 6 }, (_, i) => {
-      const d = new Date();
-      d.setMonth(d.getMonth() - 5 + i, 1);
+      const d = new Date(Date.now() + IST_OFFSET);
+      d.setUTCDate(1);
+      d.setUTCMonth(d.getUTCMonth() - 5 + i);
+      const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+      const events = present.filter(
+        (a) => a.event && monthOf(a.event.date) === key,
+      );
+      const work = contributions.filter(
+        (r) => r.status === "present" && r.date && monthOf(r.date) === key,
+      );
       return {
-        month: d.toLocaleString("en", { month: "short" }),
-        hours: attendance
-          .filter(
-            (a) =>
-              a.event &&
-              a.event.date.getMonth() === d.getMonth() &&
-              a.event.date.getFullYear() === d.getFullYear(),
-          )
-          .reduce((n, a) => n + a.hours, 0),
+        month: d.toLocaleString("en", { month: "short", timeZone: "UTC" }),
+        hours:
+          events.reduce((n, a) => n + (a.hours || 0), 0) +
+          work.reduce((n, r) => n + (r.hours || 0), 0),
+        rp:
+          events.reduce((n, a) => n + attendanceRP(a), 0) +
+          work.reduce((n, r) => n + contributionRP(r), 0),
+        activities: events.length + work.length,
       };
     });
     const currentYear = new Date().toLocaleDateString("en-US", {
@@ -765,7 +781,7 @@ router.get(
       hours,
       participated: present.length,
       joined: registrations.filter((r) => r.status === "approved").length,
-      certificates,
+      certificates: eventCertificates + programCertificates,
       upcoming: events.filter(
         (e) =>
           e.status === "upcoming" &&
