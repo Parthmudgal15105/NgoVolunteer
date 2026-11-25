@@ -5,6 +5,7 @@ import {
   HandHeart,
   MapPin,
   Users,
+  X,
 } from "lucide-react";
 export const date = (value) =>
   new Date(value).toLocaleDateString("en-IN", {
@@ -67,3 +68,59 @@ export function EventCard({ event, action }) {
     </article>
   );
 }
+
+export function PageHead({
+  eyebrow = "YOUR COMMUNITY, CONNECTED",
+  title,
+  description,
+  children,
+}) {
+  return (
+    <div className="page-head">
+      <div>
+        <span className="eyebrow">{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+export function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-backdrop">
+      <section
+        className="modal panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="section-head">
+          <h2>{title}</h2>
+          <button className="icon-button" aria-label="Close" onClick={onClose}>
+            <X />
+          </button>
+        </div>
+        {children}
+      </section>
+    </div>
+  );
+}
+// Download a CSV built from rows of plain values.
+export function downloadCsv(filename, header, rows) {
+  const cell = (v) => `"${String(v ?? "").replaceAll('"', '""')}"`;
+  const csv = [header, ...rows].map((r) => r.map(cell).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export const levelClass = (level) =>
+  ({
+    "Highly active": "active",
+    Active: "approved",
+    Occasional: "pending",
+    Inactive: "inactive",
+  })[level] || "";

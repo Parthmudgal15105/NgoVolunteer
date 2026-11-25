@@ -1,4 +1,16 @@
-import { contributionRP, isSocialDepartment } from "../utils/rewards.js";
+import {
+  contributionRP,
+  isSocialDepartment,
+  attendanceRP,
+  eventRP,
+  rpTotals,
+} from "../utils/rewards.js";
+import { fail, wrap, text, optionalNumber } from "../utils/http.js";
+import membersController from "./membersController.js";
+import {
+  certificateTemplate,
+  issueTenureCertificates,
+} from "../utils/programCertificates.js";
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -15,6 +27,7 @@ import {
   Announcement,
   SourceRow,
   Contribution,
+  RpRule,
 } from "../models/index.js";
 import { auth, admin, manager } from "../middleware/auth.js";
 import { issueCertificates } from "../utils/certificates.js";
@@ -22,17 +35,11 @@ import {
   managedUsers,
   participationScope,
   requireManaged,
+  permissions,
+  requirePermission,
+  sameDepartment,
 } from "../utils/access.js";
 const router = Router();
-const fail = (message, status = 400) => {
-  const e = new Error(message);
-  e.status = status;
-  throw e;
-};
-const wrap = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res, next)).catch(next);
-const text = (v, max = 500) =>
-  typeof v === "string" ? v.trim().slice(0, max) : "";
 const notify = (user, message) => Notification.create({ user, message });
 const session = (user) => ({
   token: jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
@@ -45,6 +52,7 @@ const session = (user) => ({
     role: user.role,
     founder: user.founder,
     departments: user.departments,
+    permissions: permissions(user),
   },
 });
 router.post(
@@ -120,7 +128,9 @@ router.get(
   ),
 );
 router.use(auth);
-router.get("/auth/me", (req, res) => res.json(req.user));
+router.get("/auth/me", (req, res) =>
+  res.json({ ...req.user.toObject(), permissions: permissions(req.user) }),
+);
 router.put(
   "/auth/password",
   wrap(async (req, res) => {
@@ -197,6 +207,7 @@ function eventFields(body) {
     date: new Date(body.date),
     hours: Number(body.hours),
     capacity: Number(body.capacity),
+    rp: body.rp === "" || body.rp == null ? 5 : Number(body.rp),
   };
   if (
     !fields.title ||
@@ -208,16 +219,20 @@ function eventFields(body) {
     fields.hours < 0.5 ||
     fields.hours > 24 ||
     !Number.isInteger(fields.capacity) ||
-    fields.capacity < 1
+    fields.capacity < 1 ||
+    !Number.isFinite(fields.rp) ||
+    fields.rp < 0 ||
+    fields.rp > 100
   )
     fail(
-      "Complete all event fields. Hours must be 0.5–24 and capacity a positive whole number.",
+      "Complete all event fields. Hours must be 0.5–24, capacity a positive whole number, and RP 0–100.",
     );
   return fields;
 }
+const eventManager = requirePermission("manageEvents");
 router.post(
   "/events",
-  admin,
+  eventManager,
   wrap(async (req, res) =>
     res.status(201).json(
       await Event.create({
@@ -229,7 +244,7 @@ router.post(
 );
 router.put(
   "/events/:id",
-  admin,
+  eventManager,
   wrap(async (req, res) => {
     const updated = await exclusive(async () => {
       const event = await Event.findById(req.params.id);
@@ -243,9 +258,9 @@ router.put(
         fail("Capacity cannot be below approved volunteers.");
       if (
         (await Attendance.exists({ event: event._id })) &&
-        fields.hours !== event.hours
+        (fields.hours !== event.hours || fields.rp !== eventRP(event))
       )
-        fail("Hours cannot change after attendance has been recorded.");
+        fail("Hours and RP cannot change after attendance has been recorded.");
       Object.assign(event, fields);
       await event.save();
       return event;
@@ -255,7 +270,7 @@ router.put(
 );
 router.post(
   "/events/:id/complete",
-  admin,
+  eventManager,
   wrap(async (req, res) => {
     const event = await Event.findById(req.params.id);
     if (!event) fail("Event not found.", 404);
@@ -269,7 +284,7 @@ router.post(
 );
 router.delete(
   "/events/:id",
-  admin,
+  eventManager,
   wrap(async (req, res) => {
     if (await EventRegistration.exists({ event: req.params.id }))
       fail(
@@ -428,17 +443,7 @@ router.get(
         },
       },
     ]);
-    const rewardTotals = new Map();
-    const addReward = (id, rp) =>
-      rewardTotals.set(String(id), (rewardTotals.get(String(id)) || 0) + rp);
-    const ids = users.map((u) => u._id);
-    for (const r of await Contribution.find({ volunteer: { $in: ids } }).lean())
-      addReward(r.volunteer, contributionRP(r));
-    for (const r of await Attendance.find({
-      volunteer: { $in: ids },
-      status: "present",
-    }).lean())
-      addReward(r.volunteer, 5);
+    const rewardTotals = await rpTotals(users.map((u) => u._id));
     const totals = new Map(contributions.map((c) => [String(c._id), c]));
     res.json(
       users.map((u) => ({
@@ -482,9 +487,7 @@ router.get(
         .populate("volunteer", "name email")
         .sort({ updatedAt: -1 })
         .lean()
-        .then((rows) =>
-          rows.map((r) => ({ ...r, rp: r.status === "present" ? 5 : 0 })),
-        ),
+        .then((rows) => rows.map((r) => ({ ...r, rp: attendanceRP(r) }))),
     ),
   ),
 );
@@ -501,54 +504,74 @@ router.get(
     );
   }),
 );
+const KINDS = ["drive", "task", "reel_edit", "misc", "custom"];
+// Heads either pick a saved RP activity for the member's department or type their own points.
+async function rewardFields(body, member, current = {}) {
+  let kind = body.kind || current.kind || (body.rule ? "custom" : "drive");
+  if (!KINDS.includes(kind)) fail("Select a valid activity type.");
+  let points = Object.hasOwn(body, "points")
+    ? optionalNumber(body.points, 0, 100, "RP")
+    : (current.points ?? null);
+  let ruleLabel = Object.hasOwn(body, "ruleLabel")
+    ? text(body.ruleLabel, 120)
+    : current.ruleLabel || "";
+  if (body.rule) {
+    const rule = await RpRule.findById(body.rule);
+    if (
+      !rule ||
+      !member.departments.some((d) => sameDepartment(d, rule.department))
+    )
+      fail("Choose an RP activity from this member's department.");
+    ruleLabel = rule.label;
+    if (points === null || !Object.hasOwn(body, "points") || body.points === "")
+      points = rule.points;
+    if (!body.kind) kind = "custom";
+  }
+  if (kind === "custom" && points === null)
+    fail("Enter how many RP this activity is worth.");
+  let sourceDepartment = current.sourceDepartment;
+  if (["reel_edit", "misc"].includes(kind)) {
+    sourceDepartment = member.departments.find(isSocialDepartment);
+    if (!sourceDepartment)
+      fail(
+        "Reel edits and miscellaneous RP are for Social Media members only.",
+      );
+  }
+  return { kind, points, ruleLabel, sourceDepartment };
+}
 router.post(
   "/contributions",
   manager,
   wrap(async (req, res) => {
-    const { volunteer, kind, status } = req.body;
+    const { volunteer, status } = req.body;
     await requireManaged(req.user, volunteer);
     const member = await User.findOne({ _id: volunteer, active: true });
     if (!member) fail("Select an active member.");
-    if (
-      ["reel_edit", "misc"].includes(kind) &&
-      !member.departments.some(isSocialDepartment)
-    )
-      fail(
-        "Reel edits and miscellaneous RP are for Social Media members only.",
-      );
     const title = text(req.body.title, 180);
     const date = new Date(req.body.date);
-    const hours =
-      req.body.hours === "" || req.body.hours == null
-        ? null
-        : Number(req.body.hours);
+    const hours = optionalNumber(req.body.hours, 0, 24, "Hours");
     if (
       !title ||
-      !["drive", "task", "reel_edit", "misc"].includes(kind) ||
       !["present", "absent"].includes(status) ||
       Number.isNaN(date.getTime()) ||
-      date > new Date() ||
-      (hours !== null && (!Number.isFinite(hours) || hours < 0 || hours > 24))
+      date > new Date()
     )
       fail(
         "Enter an activity, past date, attendance and valid hours (0–24), or leave hours blank.",
       );
-    res.status(201).json(
-      await Contribution.create({
-        volunteer,
-        title,
-        kind,
-        sourceDepartment: ["reel_edit", "misc"].includes(kind)
-          ? member.departments.find(isSocialDepartment)
-          : undefined,
-        date,
-        status,
-        hours: status === "absent" ? 0 : hours,
-        location: text(req.body.location, 180),
-        notes: text(req.body.notes, 1000),
-        markedBy: req.user._id,
-      }),
-    );
+    const record = await Contribution.create({
+      volunteer,
+      title,
+      ...(await rewardFields(req.body, member)),
+      date,
+      status,
+      hours: status === "absent" ? 0 : hours,
+      location: text(req.body.location, 180),
+      notes: text(req.body.notes, 1000),
+      markedBy: req.user._id,
+    });
+    await issueTenureCertificates({ _id: member._id });
+    res.status(201).json(record);
   }),
 );
 router.patch(
@@ -559,33 +582,17 @@ router.patch(
     if (!record) fail("Contribution not found.", 404);
     await requireManaged(req.user, record.volunteer);
     const { status } = req.body;
-    const hours =
-      req.body.hours === "" || req.body.hours == null
-        ? null
-        : Number(req.body.hours);
-    if (
-      !["present", "absent"].includes(status) ||
-      (hours !== null && (!Number.isFinite(hours) || hours < 0 || hours > 24))
-    )
+    const hours = optionalNumber(req.body.hours, 0, 24, "Hours");
+    if (!["present", "absent"].includes(status))
       fail("Select attendance and valid hours (0–24), or leave hours blank.");
-    const kind = req.body.kind || record.kind;
-    if (!["drive", "task", "reel_edit", "misc"].includes(kind))
-      fail("Select a valid activity type.");
-    if (["reel_edit", "misc"].includes(kind)) {
-      const member = await User.findById(record.volunteer);
-      const department = member.departments.find(isSocialDepartment);
-      if (!department)
-        fail(
-          "Reel edits and miscellaneous RP are for Social Media members only.",
-        );
-      record.sourceDepartment = department;
-    }
-    record.kind = kind;
+    const member = await User.findById(record.volunteer);
+    Object.assign(record, await rewardFields(req.body, member, record));
     record.status = status;
     record.hours = status === "absent" ? 0 : hours;
     record.notes = text(req.body.notes, 1000);
     record.markedBy = req.user._id;
     await record.save();
+    await issueTenureCertificates({ _id: member._id });
     res.json(record);
   }),
 );
@@ -620,6 +627,7 @@ router.put(
     if (status === "absent")
       await Certificate.deleteOne({ event: eventId, volunteer });
     await issueCertificates(eventId);
+    await issueTenureCertificates({ _id: volunteer });
     res.json(record);
   }),
 );
@@ -649,7 +657,7 @@ router.get(
       "Content-Disposition",
       `attachment; filename="${cert.certificateId}.pdf"`,
     );
-    const doc = createCertificateDocument(cert);
+    const doc = createCertificateDocument(cert, await certificateTemplate());
     doc.pipe(res);
     doc.end();
   }),
@@ -752,7 +760,7 @@ router.get(
     res.json({
       drivesCompletedThisYear,
       rp:
-        present.length * 5 +
+        present.reduce((sum, a) => sum + attendanceRP(a), 0) +
         contributions.reduce((sum, r) => sum + contributionRP(r), 0),
       hours,
       participated: present.length,
@@ -799,6 +807,7 @@ router.get(
     });
   }),
 );
+router.use(membersController);
 router.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   if (err.code === 11000)
@@ -808,14 +817,12 @@ router.use((err, req, res, next) => {
   if (err instanceof mongoose.Error.CastError)
     return res.status(400).json({ message: "Invalid record identifier." });
   if (err instanceof mongoose.Error.ValidationError)
-    return res
-      .status(400)
-      .json({
-        message:
-          process.env.NODE_ENV === "production"
-            ? "Invalid record data."
-            : err.message,
-      });
+    return res.status(400).json({
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Invalid record data."
+          : err.message,
+    });
   if (!err.status)
     console.error("API request failed", { name: err.name, code: err.code });
   res.status(err.status || 500).json({

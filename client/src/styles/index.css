@@ -2240,3 +2240,94 @@ small {
 .drive-card .text-link {
   margin-top: 12px;
 }
+
+/* Reports, attendance filters, certificate administration */
+.report-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0 14px;
+  align-items: end;
+}
+.report-filters label {
+  margin: 8px 0;
+}
+.report-stats {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 22px;
+}
+.report-stats .stat strong {
+  font-size: 24px;
+  display: block;
+  margin-top: 8px;
+}
+.report-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin-bottom: 22px;
+}
+.monthly-report,
+.volunteer-report > .panel {
+  margin-bottom: 22px;
+}
+.monthly-report > .panel {
+  margin-bottom: 22px;
+}
+.section-head.padded,
+.padded {
+  padding: 16px 22px 0;
+}
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 18px;
+  font-size: 13px;
+  margin: 12px 0 0;
+}
+.details dt {
+  color: var(--muted);
+}
+.details dd {
+  margin: 0;
+}
+td.wrap {
+  white-space: normal;
+  min-width: 200px;
+}
+.rule-form {
+  display: grid;
+  grid-template-columns: 1fr 2fr 110px auto;
+  gap: 0 14px;
+  align-items: end;
+}
+.rule-form label {
+  margin: 10px 0;
+}
+.rule-form button {
+  margin-bottom: 10px;
+}
+.credentials code {
+  font-size: 14px;
+  user-select: all;
+}
+td small.muted,
+label small.muted {
+  font-weight: 400;
+}
+@media (max-width: 800px) {
+  .report-grid,
+  .rule-form {
+    grid-template-columns: 1fr;
+  }
+}
+@media print {
+  .sidebar,
+  .topbar,
+  .no-print,
+  .scrim {
+    display: none !important;
+  }
+  .app-main {
+    margin: 0 !important;
+  }
+}

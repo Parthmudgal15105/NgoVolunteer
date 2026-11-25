@@ -210,3 +210,17 @@ The October 2026 integration reads the supplied roster PDF, account handover, dr
 Current member roles and profile details come from the final roster PDF. Multiple existing department memberships remain intact. Missing identities are preserved for review. Historical drive entries link only to a unique exact normalized member name; unmatched, incomplete and duplicate entries remain in Imported records. All supplied PDF and ODS files are archived privately in MongoDB. Certificate and department-change submissions remain source requests; they do not automatically change memberships, deactivate members, or issue certificates.
 
 Attendance now includes **Drive & task contributions**, where administrators and department heads can record a member's activity, date, attendance, optional duration, and work notes. Heads can access only their department members; volunteers can read only their own records. The Volunteers table shows each member's drive/task counts and recorded activity hours. Blank historical durations remain unknown, and contribution records do not issue certificates or alter event attendance totals. Corrections update contribution totals, and repeat imports preserve corrections.
+
+## November 2026 changes (Himanshi's list)
+
+- **Adding volunteers:** department heads can add volunteers to their own department from the Volunteers page. HR heads can add volunteers to any department. A temporary password is shown once, and the volunteer can change it in My Profile.
+- **Events:** founders, BOD and Operations department heads can create, edit, complete and delete events. Each event sets the RP a present volunteer earns (default 5).
+- **HR access:** HR heads see every volunteer's data and can issue certificates.
+- **RP choices:** heads define their department's RP activities (what the RP is for and how many points) in Attendance, or type custom points for a single entry. Records saved before this change keep their original RP.
+- **Tenure certificates:** each department head sets their department's condition: minimum RP plus tenure in months. Heads can also mark an individual volunteer's tenure (start, months, minimum RP). Once both conditions are met, a certificate is issued automatically and the volunteer is notified. Only RP earned inside the tenure counts. The tenure starts on the roster joining date unless a head marks a different start.
+- **Other certificates:** heads issue certificates such as Volunteer of the Month.
+- **Certificate editing:** only founders, BOD and heads can edit certificates, within their own scope. Manual edits are never overwritten by later attendance changes.
+- **Certificate format:** the wording follows the supplied certificate, with **bold** runs. Founders, BOD and HR can edit it under Certificates → Certificate format. The seal, trustee signatures and registration footer stay fixed.
+- **Monthly report:** Reports shows each volunteer's activity level for the month, with a department-wise rollup and a CSV download.
+- **Volunteer report:** every volunteer has a detailed report: totals, a 12-month trend, RP by activity, full history, certificates and applications. Volunteers see their own under My Report.
+- **Attendance tab:** all records appear immediately, with filters for member, department, month and status.

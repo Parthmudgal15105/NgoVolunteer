@@ -43,6 +43,14 @@ export const VolunteerProfile = model(
       availability: { type: String, default: "" },
       state: String,
       joiningDate: String,
+      // Certificate tenure marked by a head; blank fields fall back to the department rule.
+      tenure: {
+        start: Date,
+        months: { type: Number, min: 0, max: 120 },
+        minRP: { type: Number, min: 0, max: 10000 },
+        department: String,
+        markedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      },
     },
     options,
   ),
@@ -67,6 +75,8 @@ export const Event = model(
       date: { type: Date, required: true },
       hours: { type: Number, required: true, min: 0.5, max: 24 },
       capacity: { type: Number, required: true, min: 1 },
+      // Reward points for each present volunteer; missing on older events means 5.
+      rp: { type: Number, min: 0, max: 100, default: 5 },
       status: {
         type: String,
         enum: ["upcoming", "completed"],
@@ -109,9 +119,12 @@ const contributionSchema = new Schema(
     title: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["drive", "task", "reel_edit", "misc"],
+      enum: ["drive", "task", "reel_edit", "misc", "custom"],
       required: true,
     },
+    // Points chosen by the head when logging. Null keeps the legacy kind-based RP.
+    points: { type: Number, min: 0, max: 100, default: null },
+    ruleLabel: String,
     date: { type: Date, required: true },
     status: { type: String, enum: ["present", "absent"], required: true },
     hours: { type: Number, min: 0, max: 24, default: null },
@@ -130,6 +143,14 @@ const certificateSchema = new Schema(
     volunteer: ref("User"),
     certificateId: { type: String, unique: true, required: true },
     hours: { type: Number, required: true },
+    // Manual corrections by heads, founders or BOD. Attendance saves never overwrite these.
+    displayName: String,
+    overrideHours: { type: Number, min: 0, max: 10000, default: null },
+    overrideTitle: String,
+    description: String,
+    note: String,
+    editedBy: ref("User", false),
+    editedAt: Date,
   },
   options,
 );
@@ -153,6 +174,72 @@ export const Announcement = model(
       title: { type: String, required: true },
       message: { type: String, required: true },
       createdBy: ref("User"),
+    },
+    options,
+  ),
+);
+
+const rpRuleSchema = new Schema(
+  {
+    department: { type: String, required: true, trim: true },
+    label: { type: String, required: true, trim: true },
+    points: { type: Number, required: true, min: 0, max: 100 },
+    createdBy: ref("User"),
+  },
+  options,
+);
+rpRuleSchema.index({ department: 1, label: 1 }, { unique: true });
+export const RpRule = model("RpRule", rpRuleSchema);
+// Certificates not tied to one event: automatic tenure certificates and HR-issued ones.
+const programCertificateSchema = new Schema(
+  {
+    volunteer: ref("User"),
+    certificateId: { type: String, unique: true, required: true },
+    kind: { type: String, enum: ["tenure", "manual"], required: true },
+    title: { type: String, required: true },
+    description: String,
+    rp: { type: Number, default: 0 },
+    hours: { type: Number, default: null },
+    department: String,
+    period: String,
+    periodStart: Date,
+    periodEnd: Date,
+    displayName: String,
+    note: String,
+    issuedBy: ref("User", false),
+    editedBy: ref("User", false),
+    editedAt: Date,
+  },
+  options,
+);
+programCertificateSchema.index(
+  { volunteer: 1, periodStart: 1 },
+  { unique: true, partialFilterExpression: { kind: "tenure" } },
+);
+export const ProgramCertificate = model(
+  "ProgramCertificate",
+  programCertificateSchema,
+);
+export const Setting = model(
+  "Setting",
+  new Schema(
+    {
+      key: { type: String, required: true, unique: true },
+      value: Schema.Types.Mixed,
+      updatedBy: ref("User", false),
+    },
+    options,
+  ),
+);
+export const CertificateRule = model(
+  "CertificateRule",
+  new Schema(
+    {
+      department: { type: String, required: true, unique: true, trim: true },
+      minRP: { type: Number, required: true, min: 0, max: 10000 },
+      tenureMonths: { type: Number, required: true, min: 0, max: 120 },
+      enabled: { type: Boolean, default: true },
+      updatedBy: ref("User", false),
     },
     options,
   ),

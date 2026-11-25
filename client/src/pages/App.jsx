@@ -1,9 +1,20 @@
 import NgoBrand from "../components/NgoBrand";
-import Contributions from "../components/Contributions";
 import VolunteerOverview from "../components/VolunteerOverview";
+import VolunteerReport from "../components/VolunteerReport";
+import MonthlyReport from "../components/MonthlyReport";
+import AttendanceTab from "../components/AttendanceTab";
+import CertificatesPage from "../components/CertificatesPage";
 import { useData } from "../services/useData";
-import { State, Badge, Empty, EventCard, date } from "../components/Common";
-import { useEffect, useState, lazy, Suspense } from "react";
+import {
+  State,
+  Badge,
+  Empty,
+  EventCard,
+  date,
+  Modal,
+  PageHead,
+} from "../components/Common";
+import { useEffect, useState } from "react";
 import {
   Routes,
   Route,
@@ -53,10 +64,8 @@ import {
   BarChart,
   Bar,
 } from "recharts";
-import api, { downloadCertificate } from "../services/api";
+import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
-
-const PdfPreview = lazy(() => import("../components/PdfPreview"));
 
 const categories = [
   "Environment",
@@ -330,6 +339,7 @@ const volunteerLinks = [
   ["events", "Explore Drives", CalendarDays],
   ["applications", "My Applications", ClipboardCheck],
   ["attendance", "Attendance & Hours", Clock],
+  ["report", "My Report", BarChart3],
   ["notifications", "Notifications", Bell],
 ];
 function Shell() {
@@ -405,8 +415,17 @@ function Shell() {
             <Route path="events" element={<Events />} />
             <Route path="my-events" element={<Applications assigned />} />
             <Route path="applications" element={<Applications />} />
-            <Route path="attendance" element={<AttendancePage />} />
-            <Route path="certificates" element={<Certificates />} />
+            <Route path="attendance" element={<AttendanceTab />} />
+            <Route path="certificates" element={<CertificatesPage />} />
+            <Route path="report" element={<VolunteerReport self />} />
+            <Route
+              path="volunteers/:id"
+              element={
+                <AdminOnly>
+                  <VolunteerReport />
+                </AdminOnly>
+              }
+            />
             <Route path="notifications" element={<Notifications />} />
             <Route path="profile" element={<Profile />} />
             <Route
@@ -441,6 +460,7 @@ function Shell() {
               path="reports"
               element={
                 <AdminOnly>
+                  <MonthlyReport />
                   <Overview reports />
                 </AdminOnly>
               }
@@ -457,23 +477,6 @@ function AdminOnly({ children }) {
     children
   ) : (
     <Navigate to="/app" />
-  );
-}
-function PageHead({
-  eyebrow = "YOUR COMMUNITY, CONNECTED",
-  title,
-  description,
-  children,
-}) {
-  return (
-    <div className="page-head">
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {children}
-    </div>
   );
 }
 function Overview({ reports = false }) {
@@ -552,8 +555,12 @@ function Overview({ reports = false }) {
         }
       >
         <Link className="button" to="/app/events">
-          {user.role === "admin" ? <Plus size={17} /> : <Search size={17} />}{" "}
-          {user.role === "admin" ? "Manage events" : "Explore events"}
+          {user.permissions?.manageEvents ? (
+            <Plus size={17} />
+          ) : (
+            <Search size={17} />
+          )}{" "}
+          {user.permissions?.manageEvents ? "Manage events" : "Explore events"}
         </Link>
       </PageHead>
       <div className="impact-banner">
@@ -758,29 +765,9 @@ function Overview({ reports = false }) {
     </>
   );
 }
-function Modal({ title, children, onClose }) {
-  return (
-    <div className="modal-backdrop">
-      <section
-        className="modal panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="section-head">
-          <h2>{title}</h2>
-          <button className="icon-button" aria-label="Close" onClick={onClose}>
-            <X />
-          </button>
-        </div>
-        {children}
-      </section>
-    </div>
-  );
-}
 function Events({ publicView = false }) {
   const { user } = useAuth(),
-    admin = user?.role === "admin" && !publicView,
+    admin = !!user?.permissions?.manageEvents && !publicView,
     { data, error, load } = useData("/events");
   const [query, setQuery] = useState(""),
     [category, setCategory] = useState("All causes"),
@@ -906,8 +893,8 @@ function Events({ publicView = false }) {
               <MapPin size={16} /> {detail.location}
             </p>
             <p>
-              {date(detail.date)} · {detail.hours} hours · Capacity{" "}
-              {detail.capacity}
+              {date(detail.date)} · {detail.hours} hours · {detail.rp ?? 5} RP ·
+              Capacity {detail.capacity}
             </p>
             <Badge>{detail.status}</Badge>
             <div className="modal-actions">
@@ -1041,6 +1028,17 @@ function Events({ publicView = false }) {
                     max="24"
                     step="0.5"
                     defaultValue={editing.hours || 3}
+                    required
+                  />
+                </label>
+                <label>
+                  RP for each present volunteer
+                  <input
+                    name="rp"
+                    type="number"
+                    min="0"
+                    max="100"
+                    defaultValue={editing.rp ?? 5}
                     required
                   />
                 </label>
@@ -1222,281 +1220,6 @@ function Applications({ assigned = false }) {
     </>
   );
 }
-function AttendancePage() {
-  const [params, setParams] = useSearchParams();
-  const memberId = params.get("member") || "";
-  const { user } = useAuth(),
-    admin = user.role !== "volunteer",
-    { data, error, load } = useData("/attendance"),
-    { data: regs } = useData("/registrations"),
-    { data: members } = useData(admin ? "/volunteers" : null),
-    [message, setMessage] = useState(""),
-    [busy, setBusy] = useState(false);
-  const memberAttendance = data?.filter(
-    (record) => !admin || record.volunteer?._id === memberId,
-  );
-  async function mark(r, status) {
-    setBusy(true);
-    try {
-      await api.put("/attendance", {
-        event: r.event._id,
-        volunteer: r.volunteer._id,
-        status,
-      });
-      setMessage("Attendance saved. Hours recalculated.");
-      load();
-    } catch (e) {
-      setMessage(e.response?.data?.message || "Attendance update failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  const rows = admin
-    ? regs?.filter(
-        (r) =>
-          r.status === "approved" &&
-          (!memberId || r.volunteer?._id === memberId),
-      )
-    : data;
-  return (
-    <>
-      <PageHead
-        title="Every hour counts."
-        description={
-          admin
-            ? "Record attendance after an event. Complete the event to issue certificates."
-            : "Your time and participation, all in one place."
-        }
-      />
-      {message && (
-        <div role="status" className="toast">
-          {message}
-        </div>
-      )}
-      {admin && (
-        <label>
-          Member attendance
-          <select
-            value={memberId}
-            onChange={(e) =>
-              setParams(e.target.value ? { member: e.target.value } : {})
-            }
-          >
-            <option value="">Choose a member to view their records</option>
-            {members?.map((member) => (
-              <option key={member._id} value={member._id}>
-                {member.name} · {member.departments?.join(", ")}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {(!admin || memberId) && (
-        <div className="summary-strip">
-          <Clock />
-          <strong>
-            {memberAttendance?.reduce((n, a) => n + a.hours, 0) || 0} hours
-          </strong>
-          <span>of recorded event attendance</span>
-        </div>
-      )}
-      <State data={data} error={error} />
-      {admin && !memberId ? (
-        <Empty>
-          Choose a member to see their event attendance and mark changes.
-        </Empty>
-      ) : (
-        <div className="panel table-wrap">
-          <table>
-            <thead>
-              <tr>
-                {admin && <th>Volunteer</th>}
-                <th>Event</th>
-                <th>Date</th>
-                <th>Attendance</th>
-                <th>Hours</th>
-                <th>RP</th>
-                {admin && <th>Mark attendance</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows?.map((r) => {
-                const record = admin
-                  ? data?.find(
-                      (a) =>
-                        a.event?._id === r.event?._id &&
-                        a.volunteer?._id === r.volunteer?._id,
-                    )
-                  : r;
-                return (
-                  <tr key={r._id}>
-                    {admin && <td>{r.volunteer?.name}</td>}
-                    <td>{r.event?.title}</td>
-                    <td>{date(r.event?.date)}</td>
-                    <td>
-                      <Badge>{record?.status || "unmarked"}</Badge>
-                    </td>
-                    <td>{record?.hours || 0}h</td>
-                    <td>{record?.rp || 0} RP</td>
-                    {admin && (
-                      <td>
-                        <div className="inline-actions">
-                          <button
-                            className="small"
-                            disabled={
-                              busy || new Date(r.event?.date) > new Date()
-                            }
-                            onClick={() => mark(r, "present")}
-                          >
-                            Present
-                          </button>
-                          <button
-                            className="small secondary"
-                            disabled={
-                              busy || new Date(r.event?.date) > new Date()
-                            }
-                            onClick={() => mark(r, "absent")}
-                          >
-                            Absent
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {rows?.length === 0 && <Empty>No attendance records yet.</Empty>}
-        </div>
-      )}
-      <Contributions />
-    </>
-  );
-}
-function Certificates() {
-  const { user } = useAuth();
-  const { data, error } = useData("/certificates");
-  const [message, setMessage] = useState(""),
-    [preview, setPreview] = useState(null),
-    [busy, setBusy] = useState(false);
-  useEffect(
-    () => () => {
-      if (preview?.url) URL.revokeObjectURL(preview.url);
-    },
-    [preview],
-  );
-  async function openPreview(c) {
-    setBusy(true);
-    setMessage("");
-    try {
-      const { data: blob } = await api.get(`/certificates/${c._id}/download`, {
-        responseType: "blob",
-      });
-      setPreview({ certificate: c, url: URL.createObjectURL(blob) });
-    } catch {
-      setMessage("Certificate preview failed. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <>
-      <PageHead
-        title="My Certificates"
-        description="Your contribution, recognised by Warriors Without Cause."
-      />
-      {message && (
-        <div className="toast error" role="alert">
-          {message}
-        </div>
-      )}
-      <State data={data} error={error} />
-      <div className="three-grid">
-        {data?.map((c) => (
-          <article className="panel certificate-card" key={c._id}>
-            <img
-              className="certificate-logo"
-              src="/brand/ngo-logo.jpeg"
-              alt="Warriors Without Cause"
-            />
-            <span className="eyebrow">CERTIFICATE OF APPRECIATION</span>
-            <h3>{c.event?.title}</h3>
-            {user.role !== "volunteer" && <p>{c.volunteer?.name}</p>}
-            <p>
-              {c.hours} volunteer hours · {date(c.event?.date)}
-            </p>
-            <code>{c.certificateId}</code>
-            <div className="certificate-actions">
-              <button disabled={busy} onClick={() => openPreview(c)}>
-                View Certificate
-              </button>
-              <button
-                className="secondary"
-                onClick={() =>
-                  downloadCertificate(c._id).catch(() =>
-                    setMessage(
-                      "Certificate download failed. Please try again.",
-                    ),
-                  )
-                }
-              >
-                <Download size={15} />
-                Download
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-      {data?.length === 0 && (
-        <Empty>
-          Certificates appear once attendance is confirmed and the event is
-          completed.
-        </Empty>
-      )}
-      {preview && (
-        <div className="modal-backdrop">
-          <section
-            className="certificate-preview panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Certificate preview"
-          >
-            <div className="section-head">
-              <h2>Certificate of Appreciation</h2>
-              <button
-                className="icon-button"
-                aria-label="Close certificate preview"
-                onClick={() => setPreview(null)}
-              >
-                <X />
-              </button>
-            </div>
-            <Suspense
-              fallback={
-                <div className="empty">Loading certificate viewer…</div>
-              }
-            >
-              <PdfPreview url={preview.url} />
-            </Suspense>
-            <div className="preview-footer">
-              <button
-                onClick={() =>
-                  downloadCertificate(preview.certificate._id).catch(() =>
-                    setMessage("Download failed. Please try again."),
-                  )
-                }
-              >
-                <Download size={16} />
-                Download Certificate
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-    </>
-  );
-}
 function Notifications() {
   const { data, error, load } = useData("/notifications"),
     [message, setMessage] = useState("");
@@ -1630,9 +1353,137 @@ function Profile() {
     </>
   );
 }
+function AddVolunteer({ onClose, onAdded, departments }) {
+  const { user } = useAuth();
+  const [created, setCreated] = useState(null),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const own = user.departments || [];
+  const anyDepartment = user.permissions?.allVolunteers;
+  async function submit(e) {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.currentTarget));
+    if (body.joiningDate) {
+      const [y, m, d] = body.joiningDate.split("-");
+      body.joiningDate = `${d}/${m}/${y}`;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const { data } = await api.post("/volunteers", body);
+      setCreated(data);
+      onAdded();
+    } catch (e) {
+      setError(e.response?.data?.message || "Could not add volunteer.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Add a new volunteer" onClose={onClose}>
+      {created ? (
+        <div className="credentials">
+          <p>
+            <strong>{created.user.name}</strong> can now log in. Share these
+            details privately — the password is shown only once and they can
+            change it in My Profile.
+          </p>
+          <dl className="details">
+            <dt>Login ID</dt>
+            <dd>
+              <code>{created.user.loginId}</code>
+            </dd>
+            <dt>Temporary password</dt>
+            <dd>
+              <code>{created.temporaryPassword}</code>
+            </dd>
+          </dl>
+          <div className="modal-actions">
+            <button
+              className="secondary"
+              onClick={() =>
+                navigator.clipboard?.writeText(
+                  `Login ID: ${created.user.loginId}\nTemporary password: ${created.temporaryPassword}`,
+                )
+              }
+            >
+              Copy details
+            </button>
+            <button onClick={onClose}>Done</button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <label>
+              Full name
+              <input name="name" required maxLength={100} />
+            </label>
+            <label>
+              Email
+              <input name="email" type="email" required maxLength={150} />
+            </label>
+            <label>
+              Phone
+              <input name="phone" type="tel" maxLength={30} />
+            </label>
+            <label>
+              Department
+              {anyDepartment ? (
+                <>
+                  <input
+                    name="department"
+                    required
+                    list="known-departments"
+                    placeholder="Choose or type a department"
+                  />
+                  <datalist id="known-departments">
+                    {departments.map((d) => (
+                      <option key={d} value={d} />
+                    ))}
+                  </datalist>
+                </>
+              ) : (
+                <select name="department" required>
+                  {own.map((d) => (
+                    <option key={d}>{d}</option>
+                  ))}
+                </select>
+              )}
+            </label>
+            <label>
+              Role
+              <select name="organizationRole" defaultValue="Volunteer">
+                <option>Volunteer</option>
+                <option>Intern</option>
+                <option>Summer Intern</option>
+              </select>
+            </label>
+            <label>
+              Joining date
+              <input name="joiningDate" type="date" />
+            </label>
+            <label>
+              State
+              <input name="state" maxLength={60} />
+            </label>
+          </div>
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          <button disabled={busy}>Add volunteer</button>
+        </form>
+      )}
+    </Modal>
+  );
+}
 function Volunteers() {
+  const { user } = useAuth();
   const { data, error, load } = useData("/volunteers"),
     { data: events } = useData("/events"),
+    [adding, setAdding] = useState(false),
     [selected, setSelected] = useState(null),
     [message, setMessage] = useState(""),
     [query, setQuery] = useState("");
@@ -1662,7 +1513,23 @@ function Volunteers() {
       <PageHead
         title="The people behind the impact."
         description="Get to know your volunteers and connect them with meaningful work."
-      />
+      >
+        {user.permissions?.addVolunteers && (
+          <button onClick={() => setAdding(true)}>
+            <Plus size={17} />
+            Add volunteer
+          </button>
+        )}
+      </PageHead>
+      {adding && (
+        <AddVolunteer
+          onClose={() => setAdding(false)}
+          onAdded={load}
+          departments={[
+            ...new Set(data?.flatMap((v) => v.departments || []) || []),
+          ].sort()}
+        />
+      )}
       {message && (
         <div className="toast" role="status">
           {message}
@@ -1701,7 +1568,9 @@ function Volunteers() {
               .map((v) => (
                 <tr key={v._id}>
                   <td>
-                    <strong>{v.name}</strong>
+                    <Link to={`/app/volunteers/${v._id}`}>
+                      <strong>{v.name}</strong>
+                    </Link>
                     <small>{v.email}</small>
                   </td>
                   <td>
@@ -1737,6 +1606,12 @@ function Volunteers() {
                     <div className="inline-actions">
                       <Link
                         className="button small"
+                        to={`/app/volunteers/${v._id}`}
+                      >
+                        Report
+                      </Link>
+                      <Link
+                        className="button small secondary"
                         to={`/app/attendance?member=${v._id}`}
                       >
                         Attendance & RP

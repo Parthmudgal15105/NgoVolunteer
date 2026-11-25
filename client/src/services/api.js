@@ -5,10 +5,11 @@ api.interceptors.request.use((config) => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
-export async function downloadCertificate(id) {
-  const { data } = await api.get(`/certificates/${id}/download`, {
-    responseType: "blob",
-  });
+export function downloadCertificate(id) {
+  return downloadPdf(`/certificates/${id}/download`);
+}
+export async function downloadPdf(path) {
+  const { data } = await api.get(path, { responseType: "blob" });
   const url = URL.createObjectURL(data);
   const a = document.createElement("a");
   a.href = url;
